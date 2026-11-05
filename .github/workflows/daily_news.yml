@@ -1,0 +1,34 @@
+name: AI Daily News Bot
+
+on:
+  schedule:
+    # 01:00 UTC = 08:00 น. ตามเวลาประเทศไทย (UTC+7) ทุกวัน
+    - cron: '0 1 * * *'
+  # รองรับการกด Run workflow แบบ Manual บน GitHub
+  workflow_dispatch:
+
+jobs:
+  run-news-bot:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+
+      - name: Install Dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Run AI Daily News Script
+        env:
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
+        run: |
+          python main.py
