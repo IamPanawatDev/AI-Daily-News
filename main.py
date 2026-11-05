@@ -1,5 +1,6 @@
 import os
 import json
+import re
 import logging
 from datetime import datetime
 import feedparser
@@ -40,7 +41,16 @@ RSS_FEEDS = [
 ]
 
 
-def fetch_latest_news(max_items=15):
+def clean_html(text):
+    """ลบ HTML tags และช่องว่างส่วนเกินออกจากข้อความ"""
+    if not text:
+        return ""
+    clean = re.sub(r"<[^>]+>", " ", text)
+    clean = re.sub(r"\s+", " ", clean).strip()
+    return clean
+
+
+def fetch_latest_news(max_items=10):
     """ดึงข่าวล่าสุดจาก RSS Feeds และรวมรายการเข้าด้วยกัน"""
     headers = {
         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
@@ -55,20 +65,21 @@ def fetch_latest_news(max_items=15):
         try:
             resp = requests.get(url, headers=headers, timeout=15)
             feed = feedparser.parse(resp.content)
-            for entry in feed.entries[:5]:
+            for entry in feed.entries[:4]:
                 link = getattr(entry, "link", "")
                 if not link or link in seen_urls:
                     continue
                 seen_urls.add(link)
 
-                title = getattr(entry, "title", "No Title")
-                summary = getattr(entry, "summary", getattr(entry, "description", ""))
+                title = clean_html(getattr(entry, "title", "No Title"))
+                summary_raw = getattr(entry, "summary", getattr(entry, "description", ""))
+                summary = clean_html(summary_raw)[:200]
 
                 articles.append(
                     {
                         "source": name,
                         "title": title,
-                        "summary": summary[:300] if summary else "",
+                        "summary": summary,
                         "url": link,
                     }
                 )
@@ -84,52 +95,55 @@ def summarize_with_gemini(articles):
     if not GEMINI_API_KEY:
         raise ValueError("ไม่พบคีย์ GEMINI_API_KEY กรุณาตั้งค่าใน .env หรือ Secrets")
 
-    prompt = f"""คุณคือ AI News Editor หน้าที่คือคัดเลือกและสรุปข่าว AI ที่น่าสนใจที่สุดในรอบวันสำหรับคนไทย
-จากข่าวทั้งหมด {len(articles)} ข่าวต่อไปนี้ ให้คัดเลือกข่าวที่สำคัญและน่าจับตามองที่สุด 5 ข่าว
-แล้วสรุปเป็นภาษาไทยที่กระชับ สละสลวย อ่านเข้าใจง่าย
+    prompt = f"""คุณคือ AI News Editor สรุปข่าว AI ในรอบวันสำหรับคนไทย
+คัดเลือกข่าวที่สำคัญที่สุด 5 ข่าวจากรายการด้านล่าง แล้วสรุปเป็นภาษาไทยที่กระชับและเข้าใจง่าย
 
-ข่าวทั้งหมดที่รวบรวมมา:
-{json.dumps(articles, ensure_ascii=False, indent=2)}
+รายการข่าว:
+{json.dumps(articles, ensure_ascii=False, indent=1)}
 
-กรุณาตอบกลับในรูปแบบ JSON array เท่านั้น (ห้ามใส่คำเกริ่น ห้ามใส่คำปิดท้ายใดๆ นอกเหนือจาก JSON):
+ตอบกลับเป็น JSON array เท่านั้น (ไม่มีคำเกริ่น ห้ามใส่ข้อความอื่นนอกเหนือจาก JSON):
 [
   {{
-    "title_th": "หัวข้อข่าวภาษาไทยที่ดึงดูดและได้ใจความ",
-    "summary_th": "สรุปเนื้อหาสำคัญ 2-3 ประโยค กระชับ เข้าใจง่าย",
-    "key_takeaway": "ประเด็นที่น่าจับตาหรือผลกระทบสำคัญ (1 ประโยคสั้นๆ)",
+    "title_th": "หัวข้อข่าวภาษาไทย",
+    "summary_th": "สรุปเนื้อหาสำคัญ 2 ประโยค",
+    "key_takeaway": "ประเด็นที่น่าจับตา 1 ประโยคสั้นๆ",
     "source_name": "ชื่อสำนักข่าว",
-    "url": "ลิงก์ข่าวต้นฉบับ"
+    "url": "ลิงก์ข่าว"
   }}
 ]"""
 
-    # โมเดล Gemini ที่จะทดลองเรียก (มี fallback ป้องกันโมเดลใดโมเดลหนึ่งติด limit)
-    candidate_models = ["gemini-2.5-flash", "gemini-flash-latest", "gemini-1.5-flash"]
+    # โมเดล Gemini ยอดนิยมที่มีในระบบ
+    candidate_models = [
+        "gemini-flash-latest",
+        "gemini-flash-lite-latest",
+        "gemini-2.5-flash-lite",
+        "gemini-3.1-flash-lite",
+    ]
 
     for model_name in candidate_models:
         api_url = f"https://generativelanguage.googleapis.com/v1beta/models/{model_name}:generateContent?key={GEMINI_API_KEY}"
         payload = {
             "contents": [{"parts": [{"text": prompt}]}],
             "generationConfig": {
-                "temperature": 0.4,
-                "topP": 0.9,
+                "temperature": 0.3,
+                "maxOutputTokens": 2048,
             },
         }
 
         try:
             logging.info(f"กำลังเรียกใช้ Gemini API ด้วยโมเดล: {model_name}...")
-            resp = requests.post(api_url, json=payload, timeout=30)
+            resp = requests.post(api_url, json=payload, timeout=60)
             if resp.status_code == 200:
                 result = resp.json()
                 raw_text = result["candidates"][0]["content"]["parts"][0]["text"].strip()
 
                 # ล้าง code block markdown หาก Gemini คืนมาใน ```json ... ```
-                if raw_text.startswith("```"):
-                    lines = raw_text.split("\n")
-                    if lines[0].startswith("```"):
-                        lines = lines[1:]
-                    if lines and lines[-1].startswith("```"):
-                        lines = lines[:-1]
-                    raw_text = "\n".join(lines).strip()
+                if "```" in raw_text:
+                    match = re.search(r"```(?:json)?\s*(\[.*?\])\s*```", raw_text, re.DOTALL)
+                    if match:
+                        raw_text = match.group(1).strip()
+                    else:
+                        raw_text = raw_text.replace("```json", "").replace("```", "").strip()
 
                 parsed_json = json.loads(raw_text)
                 logging.info(f"Gemini สรุปข่าวสำเร็จ ({len(parsed_json)} ข่าว)")
