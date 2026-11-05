@@ -6,6 +6,9 @@ on:
     - cron: '0 1 * * *'
   # รองรับการกด Run workflow แบบ Manual บน GitHub
   workflow_dispatch:
+  # ให้สามารถรันอัตโนมัติเมื่อมีการ push โค้ดใหม่
+  push:
+    branches: [ main ]
 
 jobs:
   run-news-bot:
