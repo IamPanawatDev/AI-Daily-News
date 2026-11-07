@@ -2,13 +2,10 @@ name: AI Daily News Bot
 
 on:
   schedule:
-    # 01:00 UTC = 08:00 น. ตามเวลาประเทศไทย (UTC+7) ทุกวัน
-    - cron: '0 1 * * *'
+    # 17:00 UTC = เที่ยงคืน (00:00 น.) ตามเวลาประเทศไทย (UTC+7) ทุกวัน
+    - cron: '0 17 * * *'
   # รองรับการกด Run workflow แบบ Manual บน GitHub
   workflow_dispatch:
-  # ให้สามารถรันอัตโนมัติเมื่อมีการ push โค้ดใหม่
-  push:
-    branches: [ main ]
 
 jobs:
   run-news-bot:
